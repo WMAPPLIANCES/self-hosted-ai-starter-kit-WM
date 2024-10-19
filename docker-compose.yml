@@ -2,23 +2,23 @@ version: "3.7"
 
 services:
   traefik:
-    image: "traefik:v2.5" # Certifique-se de estar usando uma versão recente do Traefik
+    image: "traefik:v2.5"  # Usando uma versão recente do Traefik
     restart: always
     command:
       - "--api=true"
       - "--api.insecure=true"
       - "--providers.docker=true"
       - "--providers.docker.exposedbydefault=false"
-      - "--entrypoints.web.address=:80"
+      - "--entrypoints.web.address=:8080"  # Porta HTTP alterada para 8080
       - "--entrypoints.web.http.redirections.entryPoint.to=websecure"
       - "--entrypoints.web.http.redirections.entrypoint.scheme=https"
-      - "--entrypoints.websecure.address=:443"
+      - "--entrypoints.websecure.address=:8443"  # Porta HTTPS alterada para 8443
       - "--certificatesresolvers.mytlschallenge.acme.tlschallenge=true"
       - "--certificatesresolvers.mytlschallenge.acme.email=${SSL_EMAIL}"
       - "--certificatesresolvers.mytlschallenge.acme.storage=/letsencrypt/acme.json"
     ports:
-      - "80:80"
-      - "443:443"
+      - "8080:8080"   # Porta HTTP exposta externamente
+      - "8443:8443"   # Porta HTTPS exposta externamente
     volumes:
       - traefik_data:/letsencrypt
       - /var/run/docker.sock:/var/run/docker.sock:ro
@@ -27,10 +27,10 @@ services:
     image: docker.n8n.io/n8nio/n8n
     restart: always
     ports:
-      - "127.0.0.1:5678:5678"
+      - "127.0.0.1:5678:5678"  # Porta interna para n8n
     labels:
       - traefik.enable=true
-      - traefik.http.routers.n8n.rule=Host(`host.n8n.wmappliances.cloud`)
+      - traefik.http.routers.n8n.rule=Host(`host.n8n.wmappliances.cloud`)  # Substitua pelo seu domínio
       - traefik.http.routers.n8n.tls=true
       - traefik.http.routers.n8n.entrypoints=web,websecure
       - traefik.http.routers.n8n.tls.certresolver=mytlschallenge
@@ -39,22 +39,22 @@ services:
       - traefik.http.middlewares.n8n.headers.browserXSSFilter=true
       - traefik.http.middlewares.n8n.headers.contentTypeNosniff=true
       - traefik.http.middlewares.n8n.headers.forceSTSHeader=true
-      - traefik.http.middlewares.n8n.headers.SSLHost=host.n8n.wmappliances.cloud
+      - traefik.http.middlewares.n8n.headers.SSLHost=host.n8n.wmappliances.cloud  # Seu domínio
       - traefik.http.middlewares.n8n.headers.STSIncludeSubdomains=true
       - traefik.http.middlewares.n8n.headers.STSPreload=true
       - traefik.http.routers.n8n.middlewares=n8n@docker
     environment:
-      - N8N_HOST=host.n8n.wmappliances.cloud
+      - N8N_HOST=host.n8n.wmappliances.cloud  # Seu domínio
       - N8N_PORT=5678
       - N8N_PROTOCOL=https
       - NODE_ENV=production
-      - WEBHOOK_URL=https://host.n8n.wmappliances.cloud/
-      - GENERIC_TIMEZONE=${GENERIC_TIMEZONE}
+      - WEBHOOK_URL=https://host.n8n.wmappliances.cloud/  # Seu domínio
+      - GENERIC_TIMEZONE=${GENERIC_TIMEZONE}  # Variável de ambiente para o fuso horário
     volumes:
-      - n8n_data:/home/node/.n8n
+      - n8n_data:/home/node/.n8n  # Volume para persistir os dados do n8n
 
 volumes:
   traefik_data:
-    external: true
+    external: true  # Certificados SSL serão armazenados aqui
   n8n_data:
-    external: true
+    external: true  # Dados do n8n serão persistidos aqui
