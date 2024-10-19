@@ -129,3 +129,4 @@ volumes:
     external: true  # Volume para Redis
   llama_storage:
     external: true  # Volume para armazenar dados do Llama
+
