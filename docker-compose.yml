@@ -22,11 +22,19 @@ x-n8n: &service-n8n
     - N8N_USER_MANAGEMENT_JWT_SECRET=${N8N_USER_MANAGEMENT_JWT_SECRET}
     - N8N_REDIS_HOST=redis
     - N8N_REDIS_PORT=6379
+    - WEBHOOK_URL=http://host.n8n.wmappliances.cloud/  # Adicionando a URL do domínio
+    - N8N_HOST=host.n8n.wmappliances.cloud  # Hostname
+    - N8N_PORT=5678
   depends_on:
     postgres:
       condition: service_healthy
     redis:
       condition: service_healthy
+  healthcheck:
+    test: ["CMD-SHELL", "curl -f http://localhost:5678 || exit 1"]
+    interval: 30s
+    timeout: 10s
+    retries: 5
 
 x-ollama: &service-ollama
   image: ollama/ollama:latest
@@ -36,6 +44,11 @@ x-ollama: &service-ollama
     - 11434:11434
   volumes:
     - ollama_storage:/root/.ollama
+  healthcheck:
+    test: ["CMD", "curl", "-f", "http://localhost:11434", "||", "exit", "1"]
+    interval: 30s
+    timeout: 10s
+    retries: 5
 
 services:
   postgres:
@@ -113,17 +126,6 @@ services:
         condition: service_healthy
       n8n-import:
         condition: service_completed_successfully
-    entrypoint: /bin/sh
-    command:
-      - "-c"
-      - |
-        echo 'Waiting for dependencies...'
-        while ! nc -z postgres 5432 || [ ! -f /home/node/.n8n/import_done ]; do
-          sleep 1
-        done
-        echo 'Dependencies are ready. Starting n8n...'
-        sleep 5
-        n8n
 
   qdrant:
     image: qdrant/qdrant
@@ -134,6 +136,11 @@ services:
       - 6333:6333
     volumes:
       - qdrant_storage:/qdrant/storage
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:6333/health || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
 
   ollama:
     <<: *service-ollama
