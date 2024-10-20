@@ -1,132 +1,121 @@
-version: "3.7"
+volumes:
+  n8n_storage:
+  postgres_storage:
+  ollama_storage:
+  qdrant_storage:
+  redis_storage:
+
+networks:
+  demo:
+
+x-n8n: &service-n8n
+  image: n8nio/n8n:latest
+  networks: ['demo']
+  environment:
+    - DB_TYPE=postgresdb
+    - DB_POSTGRESDB_HOST=postgres
+    - DB_POSTGRESDB_USER=${POSTGRES_USER}
+    - DB_POSTGRESDB_PASSWORD=${POSTGRES_PASSWORD}
+    - N8N_DIAGNOSTICS_ENABLED=false
+    - N8N_PERSONALIZATION_ENABLED=false
+    - N8N_ENCRYPTION_KEY
+    - N8N_USER_MANAGEMENT_JWT_SECRET
+  links:
+    - postgres
+
+x-ollama: &service-ollama
+  image: ollama/ollama:latest
+  container_name: ollama
+  networks: ['demo']
+  restart: unless-stopped
+  ports:
+    - 11434:11434
+  volumes:
+    - ollama_storage:/root/.ollama
+
+x-init-ollama: &init-ollama
+  image: ollama/ollama:latest
+  networks: ['demo']
+  container_name: ollama-pull-llama
+  volumes:
+    - ollama_storage:/root/.ollama
+  entrypoint: /bin/sh
+  command:
+    - "-c"
+    - "sleep 3; OLLAMA_HOST=ollama:11434 ollama pull llama3.2 && ollama pull nomic-embed-text"
 
 services:
-  traefik:
-    image: "traefik:v2.5"  # Usando uma versão recente do Traefik
-    restart: always
-    command:
-      - "--api=true"
-      - "--api.insecure=true"
-      - "--providers.docker=true"
-      - "--providers.docker.exposedbydefault=false"
-      - "--entrypoints.web.address=:8080"  # Porta HTTP alterada para 8080
-      - "--entrypoints.web.http.redirections.entryPoint.to=websecure"
-      - "--entrypoints.web.http.redirections.entrypoint.scheme=https"
-      - "--entrypoints.websecure.address=:8443"  # Porta HTTPS alterada para 8443
-      - "--certificatesresolvers.mytlschallenge.acme.tlschallenge=true"
-      - "--certificatesresolvers.mytlschallenge.acme.email=${SSL_EMAIL}"
-      - "--certificatesresolvers.mytlschallenge.acme.storage=/letsencrypt/acme.json"
-    ports:
-      - "8080:8080"   # Porta HTTP exposta externamente
-      - "8443:8443"   # Porta HTTPS exposta externamente
+  postgres:
+    image: postgres:16-alpine
+    networks: ['demo']
+    restart: unless-stopped
+    environment:
+      - POSTGRES_USER
+      - POSTGRES_PASSWORD
+      - POSTGRES_DB
     volumes:
-      - traefik_data:/letsencrypt
-      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - postgres_storage:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -h localhost -U ${POSTGRES_USER} -d ${POSTGRES_DB}']
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  n8n-import:
+    <<: *service-n8n
+    container_name: n8n-import
+    entrypoint: /bin/sh
+    command:
+      - "-c"
+      - "n8n import:credentials --separate --input=/backup/credentials && n8n import:workflow --separate --input=/backup/workflows"
+    volumes:
+      - ./n8n/backup:/backup
+    depends_on:
+      postgres:
+        condition: service_healthy
 
   n8n:
-    image: docker.n8n.io/n8nio/n8n
-    restart: always
+    <<: *service-n8n
+    container_name: n8n
+    restart: unless-stopped
     ports:
-      - "127.0.0.1:5678:5678"  # Porta interna para n8n
-    labels:
-      - traefik.enable=true
-      - traefik.http.routers.n8n.rule=Host(`host.n8n.wmappliances.cloud`)  # Substitua pelo seu domínio
-      - traefik.http.routers.n8n.tls=true
-      - traefik.http.routers.n8n.entrypoints=web,websecure
-      - traefik.http.routers.n8n.tls.certresolver=mytlschallenge
-      - traefik.http.middlewares.n8n.headers.SSLRedirect=true
-      - traefik.http.middlewares.n8n.headers.STSSeconds=315360000
-      - traefik.http.middlewares.n8n.headers.browserXSSFilter=true
-      - traefik.http.middlewares.n8n.headers.contentTypeNosniff=true
-      - traefik.http.middlewares.n8n.headers.forceSTSHeader=true
-      - traefik.http.middlewares.n8n.headers.SSLHost=host.n8n.wmappliances.cloud  # Seu domínio
-      - traefik.http.middlewares.n8n.headers.STSIncludeSubdomains=true
-      - traefik.http.middlewares.n8n.headers.STSPreload=true
-      - traefik.http.routers.n8n.middlewares=n8n@docker
-    environment:
-      - N8N_HOST=host.n8n.wmappliances.cloud  # Seu domínio
-      - N8N_PORT=5678
-      - N8N_PROTOCOL=https
-      - NODE_ENV=production
-      - WEBHOOK_URL=https://host.n8n.wmappliances.cloud/  # Seu domínio
-      - GENERIC_TIMEZONE=Europe/Berlin
-      - TZ=Europe/Berlin
-      - DB_TYPE=postgresdb
-      - 'DB_POSTGRESDB_DATABASE=${POSTGRES_DB:-n8n}'
-      - DB_POSTGRESDB_HOST=postgresql
-      - DB_POSTGRESDB_PORT=5432
-      - DB_POSTGRESDB_USER=$SERVICE_USER_POSTGRES
-      - DB_POSTGRESDB_SCHEMA=public
-      - DB_POSTGRESDB_PASSWORD=$SERVICE_PASSWORD_POSTGRES
+      - 5678:5678
     volumes:
-      - 'n8n-data:/home/node/.n8n'
+      - n8n_storage:/home/node/.n8n
+      - ./n8n/backup:/backup
+      - ./shared:/data/shared
     depends_on:
-      postgresql:
+      postgres:
         condition: service_healthy
-      redis:
-        condition: service_healthy
-    healthcheck:
-      test:
-        - CMD-SHELL
-        - 'wget -qO- http://127.0.0.1:5678/'
-      interval: 5s
-      timeout: 20s
-      retries: 10
+      n8n-import:
+        condition: service_completed_successfully
 
-  postgresql:
-    image: 'postgres:16-alpine'
+  qdrant:
+    image: qdrant/qdrant
+    container_name: qdrant
+    networks: ['demo']
+    restart: unless-stopped
+    ports:
+      - 6333:6333
     volumes:
-      - 'postgresql-data:/var/lib/postgresql/data'
-    environment:
-      - POSTGRES_USER=$SERVICE_USER_POSTGRES
-      - POSTGRES_PASSWORD=$SERVICE_PASSWORD_POSTGRES
-      - 'POSTGRES_DB=${POSTGRES_DB:-n8n}'
-    healthcheck:
-      test:
-        - CMD-SHELL
-        - 'pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}'
-      interval: 5s
-      timeout: 20s
-      retries: 10
+      - qdrant_storage:/qdrant/storage
 
   redis:
     image: redis:6-alpine
-    restart: always
-    ports:
-      - "6379:6379"
-    environment:
-      - REDIS_PASSWORD=$REDIS_PASSWORD
-    volumes:
-      - redis-data:/data
-    healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
-      interval: 30s
-      timeout: 10s
-      retries: 5
-
-  llama:
-    image: ollama/ollama:latest
-    networks: ['default']
+    container_name: redis
+    networks: ['demo']
     restart: unless-stopped
     ports:
-      - 11434:11434
+      - 6379:6379
     volumes:
-      - llama_storage:/root/.ollama
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:11434"]
-      interval: 30s
-      timeout: 10s
-      retries: 5
+      - redis_storage:/data
 
-volumes:
-  traefik_data:
-    external: true  # Certificados SSL serão armazenados aqui
-  n8n_data:
-    external: true  # Dados do n8n serão persistidos aqui
-  postgresql-data:
-    external: true  # Volume para PostgreSQL
-  redis-data:
-    external: true  # Volume para Redis
-  llama_storage:
-    external: true  # Volume para armazenar dados do Llama
+  ollama-cpu:
+    <<: *service-ollama
+
+  ollama-pull-llama-cpu:
+    <<: *init-ollama
+    depends_on:
+      - ollama-cpu
+
 
