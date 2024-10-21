@@ -19,6 +19,9 @@ quickly get started with building self-hosted AI workflows.
 ✅ [**Self-hosted n8n**](https://n8n.io/) - Low-code platform with over 400
 integrations and advanced AI components
 
+✅ [**Redis**](https://redis.io/) - 
+
+
 ✅ [**Ollama**](https://ollama.com/) - Cross-platform LLM platform to install
 and run the latest local LLMs
 
