@@ -1,5 +1,10 @@
 Just Update .Env and You Good to go!
 
+ollama 3.2 and Nomic --- 
+Redis
+Qdrant
+PostgreSQL port Ready
+n8n
 
 # Self-hosted AI starter kit
 
